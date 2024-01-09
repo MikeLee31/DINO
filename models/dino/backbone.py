@@ -95,14 +95,20 @@ class BackboneBase(nn.Module):
         self.num_channels = num_channels
 
     def forward(self, tensor_list: NestedTensor):
+        # 输入特征图  [bs, C, H, W]  ->  返回ResNet50中 layer2 layer3 layer4层的输出特征图
+        # 0 = [bs, 512, H/8, W/8]  1 = [bs, 1024, H/16, W/16]  2 = [bs, 2048, H/32, W/32]
         xs = self.body(tensor_list.tensors)
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():
             m = tensor_list.mask
             assert m is not None
+            # 原图片mask下采样 8 16 32
             mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
             out[name] = NestedTensor(x, mask)
-
+            # 3个不同尺度的输出特征和mask  dict: 3
+            # 0: tensors[bs, 512, H/8, W/8]     mask[bs, H/8, W/8]
+            # 1: tensors[bs, 1024, H/16, W/16]  mask[bs, H/16, W/16]
+            # 3: tensors[bs, 2048, H/32, W/32]  mask[bs, H/32, W/32]
         return out
 
 

@@ -97,13 +97,13 @@ class DINO(nn.Module):
         if num_feature_levels > 1:
             num_backbone_outs = len(backbone.num_channels)
             input_proj_list = []
-            for _ in range(num_backbone_outs):
-                in_channels = backbone.num_channels[_]
+            for _ in range(num_backbone_outs): # 3 个 1*1 conv 
+                in_channels = backbone.num_channels[_] # 512, 1024, 2048 
                 input_proj_list.append(nn.Sequential(
                     nn.Conv2d(in_channels, hidden_dim, kernel_size=1),
                     nn.GroupNorm(32, hidden_dim),
-                ))
-            for _ in range(num_feature_levels - num_backbone_outs):
+                )) # 1*1 conv + gn   ---->   256
+            for _ in range(num_feature_levels - num_backbone_outs): # 1 个 3*3 conv 
                 input_proj_list.append(nn.Sequential(
                     nn.Conv2d(in_channels, hidden_dim, kernel_size=3, stride=2, padding=1),
                     nn.GroupNorm(32, hidden_dim),
@@ -236,28 +236,43 @@ class DINO(nn.Module):
         # backbone阶段
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
+        # 经过backbone resnet50  输出三个尺度的特征信息  features list:3  NestedTensor
+        # 0 = mask[bs, W/8, H/8]     tensors[bs, 512, W/8, H/8]
+        # 1 = mask[bs, W/16, H/16]   tensors[bs, 1024, W/16, H/16]
+        # 2 = mask[bs, W/32, H/32]   tensors[bs, 2048, W/32, H/32]
+        # pos: 3个不同尺度的特征对应的3个位置编码(这里一步到位直接生成经过1x1conv降维后的位置编码)
+        # 0: [bs, 256, H/8, W/8]  1: [bs, 256, H/16, W/16]  2: [bs, 256, H/32, W/32]
         features, poss = self.backbone(samples)
 
         srcs = []
         masks = []
         for l, feat in enumerate(features):
-            src, mask = feat.decompose()
-            srcs.append(self.input_proj[l](src))
-            masks.append(mask)
+            src, mask = feat.decompose() #decompose - 分解
+            srcs.append(self.input_proj[l](src))# 1*1 降维度
+            masks.append(mask)# mask保持不变即可
             assert mask is not None
+        # 第四层特征进行 conv 3x3 + GroupNorm 
         if self.num_feature_levels > len(srcs):
             _len_srcs = len(srcs)
             for l in range(_len_srcs, self.num_feature_levels):
+                # C5层输出 bs x 2048 x H/32 x W/32 x  -> bs x 256 x H/64 x W/64     3x3 Conv s=2
                 if l == _len_srcs:
                     src = self.input_proj[l](features[-1].tensors)
                 else:
                     src = self.input_proj[l](srcs[-1])
                 m = samples.mask
+                # 这一层的特征图shape变为原来一半   mask shape也要变为原来一半  [bs, H/32, H/32] -> [bs, H/64, W/64]
+                # F.interpolate数组采样操作
                 mask = F.interpolate(m[None].float(), size=src.shape[-2:]).to(torch.bool)[0]
+                # 生成这一层的位置编码  [bs, 256, H/64, W/64]
                 pos_l = self.backbone[1](NestedTensor(src, mask)).to(src.dtype)
                 srcs.append(src)
                 masks.append(mask)
                 poss.append(pos_l)
+        # 最终生成4个不同尺度的特征srcs已经对应的mask和位置编码pos
+        # srcs:  list4  0=[bs,256,H/8,W/8] 1=[bs,256,H/16,W/16] 2=[bs,256,H/32,W/32] 3=[bs,256,H/64,W/64]
+        # masks: list4  0=[bs,H/8,W/8]     1=[bs,H/16,W/16]     2=[bs,H/32,W/32]     3=[bs,H/64,W/64]
+        # pos:   list4  0=[bs,256,H/8,W/8] 1=[bs,256,H/16,W/16] 2=[bs,256,H/32,W/32] 3=[bs,256,H/64,W/64]
 
         if self.dn_number > 0 or targets is not None:
             input_query_label, input_query_bbox, attn_mask, dn_meta =\
