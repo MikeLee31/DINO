@@ -16,6 +16,7 @@ experiment-*
 not_tracked_dir/
 .vscode
 logs
+logs/
 jobs
 subs
 tmp
@@ -24,3 +25,6 @@ vis/
 model_zoo/
 model_zoo_old/
 scripts/
+data/
+ck/
+models/dino/ops/build/
