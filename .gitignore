@@ -30,3 +30,4 @@ ck/
 models/dino/ops/build/
 models/dino/ops/dist
 models/dino/ops/MultiScaleDeformableAttention.egg-info
+train.log
