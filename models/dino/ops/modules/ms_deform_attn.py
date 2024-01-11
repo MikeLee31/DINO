@@ -115,28 +115,47 @@ class MSDeformAttn(nn.Module):
 
         :return output                     (N, Length_{query}, C)
         """
-        N, Len_q, _ = query.shape
-        N, Len_in, _ = input_flatten.shape
+        N, Len_q, _ = query.shape   # bs,query length:(每张图片所有特征点的数量),256  经过位置编码的
+        N, Len_in, _ = input_flatten.shape  # bs,query length:(每张图片所有特征点的数量),256   没经过位置编码的
+        # 确定每个尺度的特征图都输入了
+        # 这里的input_spatial_shapes[:, 0]为H/8,H/16,H/32,H/64; input_spatial_shapes[:, 1]为W/8,W/16,W/32,W/64
         assert (input_spatial_shapes[:, 0] * input_spatial_shapes[:, 1]).sum() == Len_in
-
+        # value = w_v * x  通过线性变换将输入的特征图变换成value  [bs, Len_q, 256] -> [bs, Len_q, 256]
         value = self.value_proj(input_flatten)
+        # 将特征图mask过的地方（无效地方）的value用0填充
         if input_padding_mask is not None:
             value = value.masked_fill(input_padding_mask[..., None], float(0))
+        # 把value拆分成8个head      [bs, Len_q, 256] -> [bs, Len_q, 8, 32]
         value = value.view(N, Len_in, self.n_heads, self.d_model // self.n_heads)
+        # 预测采样点的坐标偏移  [bs,Len_q,256] -> [bs,Len_q,256] -> [bs, Len_q, n_head, n_level, n_point, 2] 
+        # = [bs, Len_q, 8, 4, 4, 2]
         sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points, 2)
+        # 预测采样点的注意力权重  [bs,Len_q,256] -> [bs,Len_q,128] -> [bs, Len_q, 8, 4*4]
         attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads, self.n_levels * self.n_points)
+        # 每个query在每个注意力头部内，每个特征层都采样4个特征点，即16个采样点(4x4),再对这16个采样点的注意力权重进行初始化
+        # [bs, Len_q, 8, 16] -> [bs, Len_q, 8, 16] -> [bs, Len_q, 8, 4, 4]
         attention_weights = F.softmax(attention_weights, -1).view(N, Len_q, self.n_heads, self.n_levels, self.n_points)
         # N, Len_q, n_heads, n_levels, n_points, 2
-        if reference_points.shape[-1] == 2:
+
+        if reference_points.shape[-1] == 2: # one stage
+            # [4, 2]  每个(h, w) -> (w, h)
             offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1)
+            # [bs, Len_q, 1, n_point, 1, 2] + [bs, Len_q, n_head, n_level, n_point, 2] / [1, 1, 1, n_point, 1, 2]
+            # -> [bs, Len_q, 1, n_levels, n_points, 2]
+            # 参考点 + 偏移量/特征层宽高 = 采样点
             sampling_locations = reference_points[:, :, None, :, None, :] \
                                  + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
         elif reference_points.shape[-1] == 4:
+            # 前两个是xy 后两个是wh
+            # 初始化时offset是在 -n_points ~ n_points 范围之间 这里除以self.n_points是相当于把offset归一化到 0~1
+            # 然后再乘以宽高的一半 再加上参考点的中心坐标 这就相当于使得最后的采样点坐标总是位于proposal box内
+            # 相当于对采样范围进行了约束 减少了搜索空间
             sampling_locations = reference_points[:, :, None, :, None, :2] \
                                  + sampling_offsets / self.n_points * reference_points[:, :, None, :, None, 2:] * 0.5
         else:
             raise ValueError(
                 'Last dim of reference_points must be 2 or 4, but get {} instead.'.format(reference_points.shape[-1]))
+        
 
         # for amp
         if value.dtype == torch.float16:
@@ -147,9 +166,14 @@ class MSDeformAttn(nn.Module):
             output = self.output_proj(output)
             return output
 
-
+        # 输入：采样点位置、注意力权重、所有点的value
+        # 具体过程：根据采样点位置从所有点的value中拿出对应的value，并且和对应的注意力权重进行weighted sum
+        # 调用CUDA实现的MSDeformAttnFunction函数  需要编译
+        # [bs, Len_q, 256]
         output = MSDeformAttnFunction.apply(
             value, input_spatial_shapes, input_level_start_index, sampling_locations, attention_weights, self.im2col_step)
+        # 最后进行公式中的线性运算
+        # [bs, Len_q, 256]
         output = self.output_proj(output)
         return output
 
