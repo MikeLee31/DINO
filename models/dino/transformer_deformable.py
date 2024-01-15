@@ -22,6 +22,7 @@ from torch import nn, Tensor
 from torch.nn.init import xavier_uniform_, constant_, uniform_, normal_
 
 from util.misc import inverse_sigmoid
+# 使用CUDA算子的引入
 from .ops.modules import MSDeformAttn
 
 from .utils import sigmoid_focal_loss, MLP, _get_activation_fn, gen_sineembed_for_position
@@ -344,9 +345,11 @@ class DeformableTransformerDecoderLayer(nn.Module):
 
         # cross attention
         # self.cross_attn = MSDeformAttn(d_model, n_levels, n_heads, n_points)
+        # 默认FALSE
         if use_deformable_box_attn:
             self.cross_attn = MSDeformableBoxAttention(d_model, n_levels, n_heads, n_boxes=n_points, used_func=box_attn_type)
         else:
+            # lh modify tf在这里
             self.cross_attn = MSDeformAttn(d_model, n_levels, n_heads, n_points)
         self.dropout1 = nn.Dropout(dropout)
         self.norm1 = nn.LayerNorm(d_model)

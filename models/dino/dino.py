@@ -234,8 +234,10 @@ class DINO(nn.Module):
                                 dictionnaries containing the two above keys for each decoder layer.
         """
         # backbone阶段
+        # sample torch.Size([2, 3, 640, 701]
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
+            
         # 经过backbone resnet50  输出三个尺度的特征信息  features list:3  NestedTensor
         # 0 = mask[bs, W/8, H/8]     tensors[bs, 512, W/8, H/8]
         # 1 = mask[bs, W/16, H/16]   tensors[bs, 1024, W/16, H/16]
@@ -243,7 +245,6 @@ class DINO(nn.Module):
         # pos: 3个不同尺度的特征对应的3个位置编码(这里一步到位直接生成经过1x1conv降维后的位置编码)
         # 0: [bs, 256, H/8, W/8]  1: [bs, 256, H/16, W/16]  2: [bs, 256, H/32, W/32]
         features, poss = self.backbone(samples)
-
         srcs = []
         masks = []
         for l, feat in enumerate(features):

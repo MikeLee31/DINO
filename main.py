@@ -143,7 +143,6 @@ def main(args):
     model, criterion, postprocessors = build_model_main(args)
     wo_class_error = False
     model.to(device)
-
     # ema
     if args.use_ema:
         ema_m = ModelEma(model, args.ema_decay)
