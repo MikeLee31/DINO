@@ -245,6 +245,8 @@ class DINO(nn.Module):
         # pos: 3个不同尺度的特征对应的3个位置编码(这里一步到位直接生成经过1x1conv降维后的位置编码)
         # 0: [bs, 256, H/8, W/8]  1: [bs, 256, H/16, W/16]  2: [bs, 256, H/32, W/32]
         features, poss = self.backbone(samples)
+
+        # 组合layer5
         srcs = []
         masks = []
         for l, feat in enumerate(features):
