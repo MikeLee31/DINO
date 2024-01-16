@@ -24,7 +24,6 @@ tmp
 vis/
 model_zoo/
 model_zoo_old/
-scripts/
 data/
 ck/
 models/dino/ops/build/
