@@ -104,6 +104,7 @@ class BackboneBase(nn.Module):
             assert m is not None
             # 原图片mask下采样 8 16 32
             mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
+            print(mask.shape)
             out[name] = NestedTensor(x, mask)
             # 3个不同尺度的输出特征和mask  dict: 3
             # 0: tensors[bs, 512, H/8, W/8]     mask[bs, H/8, W/8]
